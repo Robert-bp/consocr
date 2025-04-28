@@ -1,0 +1,4 @@
+azure-functions
+azure-ai-formrecognizer
+azure-cosmos
+pandas
