@@ -310,6 +310,37 @@ def process_table_cells(doc_id, table_df, page_number, table_idx):
     document_status = (
         "ready_for_export" if auto_approved_cells == total_cells else "ready_for_review"
     )
+    # Choose a reviewer from the pool
+    assigned_reviewer = None
+    if REVIEWERS:
+        # Assign document to a reviewer (round-robin)
+        doc_count = get_document_count()  # implement this to count total docs
+        assigned_reviewer = REVIEWERS[doc_count % POOL_LEN]
+
+    # Determine document status based on cell approval
+    document_status = "ready_for_export" if auto_approved_cells == total_cells else "ready_for_review"
+
+    # Update document status
+    update_document_status(
+        doc_id,
+        document_status,  # Use the variable we set above
+        reviewerId=assigned_reviewer,  # Assign at document level
+        totalCells=total_cells,
+        pendingCells=(total_cells - auto_approved_cells),
+    )
+    
+    # Get all assigned reviewers for the document
+    cells_container = get_cosmos_container(CELLS_CONTAINER)
+    assigned_reviewers_query = f"""
+        SELECT DISTINCT c.assignedTo 
+        FROM c 
+        WHERE c.documentId = '{doc_id}' AND c.assignedTo != null
+    """
+    reviewers = [item['assignedTo'] for item in cells_container.query_items(
+        query=assigned_reviewers_query,
+        enable_cross_partition_query=True
+    )]
+    
     update_document_status(
         doc_id,
         document_status,
@@ -317,11 +348,20 @@ def process_table_cells(doc_id, table_df, page_number, table_idx):
         approvedCells=auto_approved_cells,
         reviewedCells=auto_approved_cells,
         pendingCells=(total_cells - auto_approved_cells),
-    )
+        assignedReviewers=reviewers  # Add this field to track which reviewers are assigned
+    )       
 
     return total_cells, auto_approved_cells
 # ----------------------------------------------------------------------
-
+def get_document_count():
+    """Get total count of documents for round-robin assignment"""
+    container = get_cosmos_container(DOCUMENTS_CONTAINER)
+    query = "SELECT VALUE COUNT(1) FROM c"
+    count = list(container.query_items(
+        query=query,
+        enable_cross_partition_query=True
+    ))[0]
+    return count
 def analyze_document(doc_id, blob_name, content_type):
     """Process document with Azure Document Intelligence"""
     document_client = get_document_client()

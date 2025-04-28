@@ -67,29 +67,9 @@ def get_documents_for_review(reviewer_id=None, limit=100):
     # Query for documents with 'ready_for_review' status
     query = "SELECT * FROM c WHERE c.status = 'ready_for_review'"
     
-    # Filter by cells assigned to this reviewer
+    # Filter by reviewer if specified
     if reviewer_id:
-        # First, find documents with cells assigned to this reviewer
-        cells_container = get_cosmos_container(CELLS_CONTAINER)
-        assigned_docs_query = f"""
-            SELECT DISTINCT c.documentId FROM c 
-            WHERE c.assignedTo = '{reviewer_id}' AND c.status = 'needs_review'
-        """
-        assigned_docs = list(cells_container.query_items(
-            query=assigned_docs_query,
-            enable_cross_partition_query=True
-        ))
-        
-        # Get document IDs
-        doc_ids = [doc['documentId'] for doc in assigned_docs]
-        
-        if doc_ids:
-            # Add filter for these document IDs
-            doc_id_list = "'" + "', '".join(doc_ids) + "'"
-            query += f" AND c.id IN ({doc_id_list})"
-        else:
-            # No documents assigned to this reviewer
-            query += " AND 1=0"  # Will return no results
+        query += f" AND (c.reviewerId = '{reviewer_id}' OR c.reviewerId = null)"
     
     query += " ORDER BY c.createdAt ASC"
     
