@@ -40,6 +40,10 @@ COSMOS_CONNECTION_STRING = os.environ.get("COSMOS_DB_CONNECTION_STRING")
 DOC_ENDPOINT = os.environ.get("DOCUMENT_INTELLIGENCE_ENDPOINT")
 DOC_KEY = os.environ.get("DOCUMENT_INTELLIGENCE_KEY")
 
+
+container_name = "document-uploads"
+prefix = "moncton/"
+
 # Container names
 BLOB_CONTAINER_NAME = "document-uploads"
 RESULTS_CONTAINER_NAME = "processed-results"
@@ -53,7 +57,7 @@ PAIRS_CONTAINER = "pd_seq_pairs"
 CELLS_CONTAINER = "table_cells"
 
 # Max PDF pages to process
-MAX_PDF_PAGES = 20
+MAX_PDF_PAGES = 10000
 
 REVIEWERS = os.getenv("REVIEWER_POOL", "").split(",")
 REVIEWERS = [r.strip() for r in REVIEWERS if r.strip()]
@@ -114,12 +118,17 @@ def update_document_status(doc_id, status, **kwargs):
     
     return False
 
-def get_documents_to_process(limit=10):
+def get_documents_to_process(limit=10000):
     """Get list of documents that need processing"""
     container = get_cosmos_container(DOCUMENTS_CONTAINER)
     
-    # Query for documents with 'uploaded' status
-    query = "SELECT * FROM c WHERE c.status = 'queued' ORDER BY c.createdAt ASC"
+    query = """
+        SELECT * FROM c 
+        WHERE c.status = 'queued' 
+        AND CONTAINS(c.blobName, 'mississauga/')
+        ORDER BY c.createdAt ASC
+    """
+
     
     if limit:
         query += f" OFFSET 0 LIMIT {limit}"
@@ -245,7 +254,7 @@ def process_table_cells(doc_id, table_df, page_number, table_idx):
         # ------------------------------------------------------------------
         #  ❶  Crop and upload low-confidence cells
         # ------------------------------------------------------------------
-        if needs_review and page_img is not None and "BoundingBox" in row:
+        if needs_review and page_img is not None and "BoundingBox" in row.index and not pd.isna(row["BoundingBox"]):
             # row["BoundingBox"] expected as [x0, y0, x1, y1, …] 0-1 floats
             bb = row["BoundingBox"]
             xs, ys = bb[::2], bb[1::2]
@@ -344,6 +353,7 @@ def process_table_cells(doc_id, table_df, page_number, table_idx):
     update_document_status(
         doc_id,
         document_status,
+        reviewerId=assigned_reviewer,   # ← keep the reviewer here, too
         totalCells=total_cells,
         approvedCells=auto_approved_cells,
         reviewedCells=auto_approved_cells,
@@ -362,6 +372,7 @@ def get_document_count():
         enable_cross_partition_query=True
     ))[0]
     return count
+
 def analyze_document(doc_id, blob_name, content_type):
     """Process document with Azure Document Intelligence"""
     document_client = get_document_client()
@@ -643,7 +654,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Process queued documents from Cosmos."
     )
-    parser.add_argument("-n", "--batch-size", type=int, default=10,
+    parser.add_argument("-n", "--batch-size", type=int, default=49,
                         help="How many queued docs to process per run")
     parser.add_argument("--delay", type=int, default=1,
                         help="Delay (s) between docs")

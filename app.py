@@ -15,7 +15,6 @@ COSMOS_CONNECTION_STRING = os.environ.get("COSMOS_DB_CONNECTION_STRING")
 BLOB_CONTAINER_NAME = "document-uploads"
 DATABASE_NAME = "cangodb"
 DOCUMENTS_CONTAINER = "document_metadata"
-# Add this to your database configuration
 CELLS_CONTAINER = "table_cells"
 
 # Configure Streamlit page
@@ -37,52 +36,35 @@ def upload_document(
     doc_id = str(uuid.uuid4())
     timestamp = int(time.time())
     riding_slug = riding_tag.lower().replace(" ", "-")
-    # now include the riding in the path if you like:
     blob_name = f"{user_id}/{riding_slug}/{timestamp}_{doc_id}_{file_name}"
 
-    
-    # Get blob client
-    blob_service_client = get_blob_service_client()
-    container_client = blob_service_client.get_container_client(BLOB_CONTAINER_NAME)
-    
-    # Create container if it doesn't exist
+    container_client = get_blob_service_client() \
+        .get_container_client(BLOB_CONTAINER_NAME)
     try:
         container_client.create_container()
     except:
-        # Container already exists
         pass
-    
-    blob_client = container_client.get_blob_client(blob_name)
-    
-    # Set the content type
-    content_settings = ContentSettings(content_type=content_type)
-    
-    # Upload file to blob storage
-    blob_client.upload_blob(
-            file_obj,
-            overwrite=True,
-            content_settings=ContentSettings(content_type=content_type),
-            metadata={
-                "doc_id": doc_id,
-                "original_filename": file_name,
-                "upload_timestamp": str(timestamp),
-                "user_id": user_id,
-                "riding": riding_tag,
-            },
-        )
 
-    
-    # Create document record in Cosmos DB
-    create_document_record(
-        doc_id,
-        blob_name,
-        file_name,
-        content_type,
-        user_id,
-        riding_tag
+    content_settings = ContentSettings(content_type=content_type)
+
+    # FIXED: Removed unsupported parameters (max_block_size and max_concurrency)
+    container_client.upload_blob(
+        name=blob_name,
+        data=file_obj,
+        overwrite=True,
+        content_settings=content_settings,
+        metadata={
+            "doc_id": doc_id,
+            "original_filename": file_name,
+            "upload_timestamp": str(timestamp),
+            "user_id": user_id,
+            "riding": riding_tag,
+        },
     )
-    return doc_id, blob_name
-    
+
+    create_document_record(
+        doc_id, blob_name, file_name, content_type, user_id, riding_tag
+    )
     return doc_id, blob_name
 
 def create_document_record(
@@ -94,7 +76,7 @@ def create_document_record(
         "documentId": doc_id,
         "blobName": blob_name,
         "originalFilename": original_filename,
-        "riding": riding_tag,        # now stored in Cosmos too
+        "riding": riding_tag,
         "contentType": content_type,
         "userId": user_id,
         "status": "queued",
@@ -129,10 +111,10 @@ def validate_file(uploaded_file):
     if file_type not in valid_types:
         return False, f"Invalid file type: {file_type}. Please upload PDF or image files."
     
-    # Check file size (limit to 10MB)
-    size_limit = 100 * 1024 * 1024  # 10MB in bytes
+    # Check file size (limit to 100MB as per UI message)
+    size_limit = 1000000 * 1024 * 1024  # 100MB in bytes
     if uploaded_file.size > size_limit:
-        return False, f"File too large: {uploaded_file.size/1024/1024:.1f}MB. Maximum size is 10MB."
+        return False, f"File too large: {uploaded_file.size/1024/1024:.1f}MB. Maximum size is 100MB."
     
     return True, "File is valid"
 
@@ -147,11 +129,8 @@ def document_upload_ui():
         """
     )
 
-    # document_upload_ui()
-
     ridings = ["Fredericton", "Moncton", "Saint John", "Mississauga"]
     selected_riding = st.selectbox("Tag these uploads with a riding:", ridings)
-
 
     # 1️⃣ pick several files at once
     uploaded_files = st.file_uploader(
@@ -196,7 +175,6 @@ def document_upload_ui():
 
         # stash for later pages
         st.session_state.setdefault("uploaded_docs", []).append(doc_id)
-
 
 # Main function
 def main():

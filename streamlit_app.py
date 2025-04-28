@@ -67,10 +67,9 @@ def get_documents_for_review(reviewer_id=None, limit=100):
     # Query for documents with 'ready_for_review' status
     query = "SELECT * FROM c WHERE c.status = 'ready_for_review'"
     
-    # Filter by reviewer if specified
-    if reviewer_id:
-        query += f" AND (c.reviewerId = '{reviewer_id}' OR c.reviewerId = null)"
-    
+    # ❌ REMOVE reviewer filtering
+    # (We don't add anything based on reviewer_id)
+
     query += " ORDER BY c.createdAt ASC"
     
     if limit:
@@ -88,10 +87,9 @@ def get_reviewed_documents(reviewer_id=None, limit=100):
     # Query for documents with 'reviewed' status
     query = "SELECT * FROM c WHERE c.status = 'reviewed'"
     
-    # Filter by reviewer if specified
-    if reviewer_id:
-        query += f" AND c.reviewerId = '{reviewer_id}'"
-    
+    # ❌ REMOVE reviewer filtering
+    # (We don't add anything based on reviewer_id)
+
     query += " ORDER BY c.reviewCompletedAt DESC"
     
     if limit:
@@ -101,6 +99,7 @@ def get_reviewed_documents(reviewer_id=None, limit=100):
         query=query,
         enable_cross_partition_query=True
     ))
+
 
 def get_document_tables(doc_id, page_number=None):
     """Get tables for a specific document"""
@@ -148,14 +147,10 @@ def display_cell_review(doc_id, page_number, table_id):
     query = f"""
         SELECT * FROM c
         WHERE  c.documentId = '{doc_id}'
-          AND  c.pageNumber = {page_number}
-          AND  c.tableId    = {table_id}
-          AND  c.status     = 'needs_review'
-          AND  (
-                 c.assignedTo = '{reviewer}'
-              OR IS_DEFINED(c.assignedTo)=false
-              )
-    """
+        AND  c.pageNumber = {page_number}
+        AND  c.tableId    = {table_id}
+        AND  c.status     = 'needs_review'
+        """
     cells = list(
         get_cosmos_container(CELLS_CONTAINER).query_items(
             query=query, enable_cross_partition_query=True
