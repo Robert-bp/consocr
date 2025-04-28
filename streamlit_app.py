@@ -17,9 +17,23 @@ from dotenv import load_dotenv
 load_dotenv()
 REVIEWER_POOL = [r.strip() for r in os.getenv("REVIEWER_POOL","").split(",") if r.strip()]
 
-# Azure configuration
-AZURE_STORAGE_CONNECTION_STRING = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
-COSMOS_CONNECTION_STRING = os.environ.get("COSMOS_DB_CONNECTION_STRING")
+# ── pull creds from st.secrets when running on Streamlit Cloud ─────────
+if "azure" in st.secrets:
+    os.environ["AZURE_STORAGE_CONNECTION_STRING"] = st.secrets["azure"]["AZURE_STORAGE_CONNECTION_STRING"]
+    os.environ["COSMOS_DB_CONNECTION_STRING"]     = st.secrets["azure"]["COSMOS_DB_CONNECTION_STRING"]
+if "document_intelligence" in st.secrets:
+    os.environ["DOCUMENT_INTELLIGENCE_ENDPOINT"]  = st.secrets["document_intelligence"]["DOCUMENT_INTELLIGENCE_ENDPOINT"]
+    os.environ["DOCUMENT_INTELLIGENCE_KEY"]       = st.secrets["document_intelligence"]["DOCUMENT_INTELLIGENCE_KEY"]
+if "openai" in st.secrets:
+    os.environ["OPENAI_API_KEY"]                  = st.secrets["openai"]["OPENAI_API_KEY"]
+
+# ── NOW turn env-vars into real Python constants ───────────────────────
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+COSMOS_CONNECTION_STRING        = os.getenv("COSMOS_DB_CONNECTION_STRING")
+DOC_ENDPOINT                    = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT")
+DOC_KEY                         = os.getenv("DOCUMENT_INTELLIGENCE_KEY")
+
+
 RESULTS_CONTAINER_NAME = "processed-results"
 
 # Database configuration
