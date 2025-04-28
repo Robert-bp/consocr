@@ -1,0 +1,22 @@
+# ──  Streamlit UI  ─────────────────────────────
+streamlit>=1.32          # current stable (has st.rerun)
+
+# ──  Azure SDKs  ───────────────────────────────
+azure-core>=1.29
+azure-identity>=1.15     # only if you ever swap to AAD auth
+azure-cosmos>=4.6        # Cosmos DB
+azure-storage-blob>=12.25
+azure-ai-formrecognizer>=3.3  # gives DocumentAnalysisClient
+#  └─ If you later migrate to the “Document Intelligence” SDK:
+#     azure-ai-documentintelligence>=1.0.0b2  (and drop the line above)
+
+# ──  PDF / image handling  ─────────────────────
+pdf2image>=1.17          # needs poppler on the OS – see note below
+pillow>=10.2
+
+# ──  Data wrangling  ───────────────────────────
+pandas>=2.2
+numpy>=1.26
+
+# ──  Helpers  ──────────────────────────────────
+python-dotenv>=1.0       # reads your .env file locally
