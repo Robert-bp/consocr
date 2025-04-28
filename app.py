@@ -31,17 +31,15 @@ def get_cosmos_container():
     database = cosmos_client.get_database_client(DATABASE_NAME)
     return database.get_container_client(DOCUMENTS_CONTAINER)
 
-def upload_document(file_obj, file_name, content_type, user_id="default"):
-    """
-    Upload a document to Azure Blob Storage
-    Returns: (document_id, blob_name)
-    """
-    # Generate a unique document ID
+def upload_document(
+    file_obj, file_name, content_type, user_id="default", riding_tag="unassigned"
+):
     doc_id = str(uuid.uuid4())
-    
-    # Create a unique blob name to avoid collisions
     timestamp = int(time.time())
-    blob_name = f"{user_id}/{timestamp}_{doc_id}_{file_name}"
+    riding_slug = riding_tag.lower().replace(" ", "-")
+    # now include the riding in the path if you like:
+    blob_name = f"{user_id}/{riding_slug}/{timestamp}_{doc_id}_{file_name}"
+
     
     # Get blob client
     blob_service_client = get_blob_service_client()
@@ -61,35 +59,45 @@ def upload_document(file_obj, file_name, content_type, user_id="default"):
     
     # Upload file to blob storage
     blob_client.upload_blob(
-        file_obj, 
-        overwrite=True,
-        content_settings=content_settings,
-        metadata={
-            "doc_id": doc_id,
-            "original_filename": file_name,
-            "upload_timestamp": str(timestamp),
-            "user_id": user_id
-        }
-    )
+            file_obj,
+            overwrite=True,
+            content_settings=ContentSettings(content_type=content_type),
+            metadata={
+                "doc_id": doc_id,
+                "original_filename": file_name,
+                "upload_timestamp": str(timestamp),
+                "user_id": user_id,
+                "riding": riding_tag,
+            },
+        )
+
     
     # Create document record in Cosmos DB
-    create_document_record(doc_id, blob_name, file_name, content_type, user_id)
+    create_document_record(
+        doc_id,
+        blob_name,
+        file_name,
+        content_type,
+        user_id,
+        riding_tag
+    )
+    return doc_id, blob_name
     
     return doc_id, blob_name
 
-def create_document_record(doc_id, blob_name, original_filename, content_type, user_id):
-    """Create a record in Cosmos DB with status 'uploaded'"""
+def create_document_record(
+    doc_id, blob_name, original_filename, content_type, user_id, riding_tag
+):
     container = get_cosmos_container()
-    
-    # Create the document metadata record
     document = {
         "id": doc_id,
         "documentId": doc_id,
         "blobName": blob_name,
         "originalFilename": original_filename,
+        "riding": riding_tag,        # now stored in Cosmos too
         "contentType": content_type,
         "userId": user_id,
-        "status": "queued",  # Initial status after upload
+        "status": "queued",
         "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "lastUpdatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "reviewerId": None,
@@ -122,68 +130,73 @@ def validate_file(uploaded_file):
         return False, f"Invalid file type: {file_type}. Please upload PDF or image files."
     
     # Check file size (limit to 10MB)
-    size_limit = 10 * 1024 * 1024  # 10MB in bytes
+    size_limit = 100 * 1024 * 1024  # 10MB in bytes
     if uploaded_file.size > size_limit:
         return False, f"File too large: {uploaded_file.size/1024/1024:.1f}MB. Maximum size is 10MB."
     
     return True, "File is valid"
 
 def document_upload_ui():
-    """Streamlit UI for document upload"""
+    """Streamlit UI for multi-file upload"""
     st.title("Document Upload")
-    
-    st.write("""
-    Upload PDF documents or images for processing. 
-    Files will be analyzed using Azure Document Intelligence.
-    """)
-    
-    # File uploader widget
-    uploaded_file = st.file_uploader("Choose a file", type=["pdf", "png", "jpg", "jpeg", "tiff", "bmp"])
-    
-    if uploaded_file is not None:
-        # Display file info
-        st.write(f"Filename: {uploaded_file.name}")
-        st.write(f"File size: {uploaded_file.size/1024:.1f} KB")
-        st.write(f"File type: {uploaded_file.type}")
-        
-        # Add a process button
-        if st.button("Upload Document"):
-            # Validate the file
-            is_valid, message = validate_file(uploaded_file)
-            
-            if not is_valid:
-                st.error(message)
-            else:
-                # Show progress
-                with st.spinner("Uploading document..."):
-                    try:
-                        # Get current user ID (you would implement your own user management)
-                        user_id = st.session_state.get("user_id", "default_user")
-                        
-                        # Upload the file
-                        doc_id, blob_name = upload_document(
-                            uploaded_file.getvalue(),
-                            uploaded_file.name,
-                            uploaded_file.type,
-                            user_id
-                        )
-                        
-                        # Success message
-                        st.success(f"Document uploaded successfully! Document ID: {doc_id}")
-                        st.info("Your document has been uploaded and is ready for processing.")
-                        
-                        # Store doc_id in session state for later reference
-                        if "uploaded_docs" not in st.session_state:
-                            st.session_state.uploaded_docs = []
-                        st.session_state.uploaded_docs.append(doc_id)
-                        
-                        # Display the document ID in a format that's easy to copy
-                        st.code(doc_id)
-                        
-                    except Exception as e:
-                        st.error(f"Error uploading document: {str(e)}")
-                        import traceback
-                        st.code(traceback.format_exc())
+
+    st.write(
+        """
+        Upload one **or many** PDFs / images.  
+        Each file is streamed to Azure Blob Storage and queued for OCR.
+        """
+    )
+
+    # document_upload_ui()
+
+    ridings = ["Fredericton", "Moncton", "Saint John", "Mississauga"]
+    selected_riding = st.selectbox("Tag these uploads with a riding:", ridings)
+
+
+    # 1️⃣ pick several files at once
+    uploaded_files = st.file_uploader(
+        "Choose PDF or image files",
+        type=["pdf", "png", "jpg", "jpeg", "tiff", "bmp"],
+        accept_multiple_files=True
+    )
+
+    if not uploaded_files:
+        return  # nothing chosen yet
+
+    # 2️⃣ get the current user *once* (replace with your auth later)
+    user_id = st.session_state.get("user_id", "default_user")
+
+    # 3️⃣ iterate through the selection
+    for f in uploaded_files:
+        st.markdown(f"##### 📄 {f.name}")
+
+        # — validation —
+        ok, msg = validate_file(f)
+        if not ok:
+            st.error(msg)
+            continue
+
+        # — upload with a progress spinner —
+        with st.spinner("Uploading..."):
+            try:
+                doc_id, _ = upload_document(
+                    f,          # pass the stream directly
+                    f.name,
+                    f.type,
+                    user_id,
+                    riding_tag=selected_riding
+                )
+            except Exception as e:
+                st.error(f"Upload failed: {e}")
+                continue
+
+        # — success feedback —
+        st.success(f"Uploaded ✔️  Document ID `{doc_id}`")
+        st.code(doc_id)
+
+        # stash for later pages
+        st.session_state.setdefault("uploaded_docs", []).append(doc_id)
+
 
 # Main function
 def main():
